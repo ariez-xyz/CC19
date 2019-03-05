@@ -9593,5 +9593,7 @@ int main(int argc, char** argv) {
 
   init_library();
 
+  print("David Pape\n");
+
   return selfie();
 }
