@@ -146,7 +146,6 @@ void     string_reverse(char* s);
 uint64_t string_compare(char* s, char* t);
 
 uint64_t atoi(char* s);
-uint64_t atoi_with_base(char* s, uint64_t base);
 char*    itoa(uint64_t n, char* s, uint64_t b, uint64_t a);
 
 uint64_t fixed_point_ratio(uint64_t a, uint64_t b, uint64_t f);
@@ -1918,12 +1917,7 @@ uint64_t string_compare(char* s, char* t) {
       return 0;
 }
 
-
 uint64_t atoi(char* s) {
-    return atoi_with_base(s, 10);
-}
-
-uint64_t atoi_with_base(char* s, uint64_t base) {
   uint64_t i;
   uint64_t n;
   uint64_t c;
@@ -1945,7 +1939,7 @@ uint64_t atoi_with_base(char* s, uint64_t base) {
     // is offset by the ASCII code of '0' (which is 48)
     c = c - '0';
 
-    if (c > base - 1) {
+    if (c > 9) {
       printf2("%s: cannot convert non-decimal number %s\n", selfie_name, s);
 
       exit(EXITCODE_BADARGUMENTS);
@@ -1954,11 +1948,11 @@ uint64_t atoi_with_base(char* s, uint64_t base) {
     // assert: s contains a decimal number
 
     // use base 10 but detect wrap around
-    if (n < UINT64_MAX / base)
-      n = n * base + c;
-    else if (n == UINT64_MAX / base)
-      if (c <= UINT64_MAX % base)
-        n = n * base + c;
+    if (n < UINT64_MAX / 10)
+      n = n * 10 + c;
+    else if (n == UINT64_MAX / 10)
+      if (c <= UINT64_MAX % 10)
+        n = n * 10 + c;
       else {
         // s contains a decimal number larger than UINT64_MAX
         printf2("%s: cannot convert out-of-bound number %s\n", selfie_name, s);
@@ -1979,9 +1973,6 @@ uint64_t atoi_with_base(char* s, uint64_t base) {
     // bit shifting since memory access can only be done in double words
     c = load_character(s, i);
   }
-
-  if(base == 16)
-  printf1("%d\n", (char*) n);
 
   return n;
 }
@@ -2635,8 +2626,6 @@ uint64_t is_character_digit() {
     return 0;
 }
 
-//TODO is_character_hex_digit implementieren, in get_symbol verwenden, wenn hex ist
-
 uint64_t is_character_letter_or_digit_or_underscore() {
   if (is_character_letter())
     return 1;
@@ -2691,7 +2680,6 @@ uint64_t identifier_or_keyword() {
 
 void get_symbol() {
   uint64_t i;
-  uint64_t base;
 
   // reset previously scanned symbol
   symbol = SYM_EOF;
@@ -2729,17 +2717,6 @@ void get_symbol() {
         integer = string_alloc(MAX_INTEGER_LENGTH);
 
         i = 0;
-        
-        base = 10;
-
-        // check for 0x prefix indicating hexadecimal number
-        if(character == '0') {
-            get_character();
-            if(character == 'x') {
-                get_character();
-                base = 16;
-            } 
-        } 
 
         while (is_character_digit()) {
           if (i >= MAX_INTEGER_LENGTH) {
@@ -2760,7 +2737,7 @@ void get_symbol() {
 
         store_character(integer, i, 0); // null-terminated string
 
-        literal = atoi_with_base(integer, base);
+        literal = atoi(integer);
 
         if (integer_is_signed)
           if (literal > INT64_MIN) {
