@@ -146,6 +146,7 @@ void     string_reverse(char* s);
 uint64_t string_compare(char* s, char* t);
 
 uint64_t atoi(char* s);
+uint64_t atoi_base(char* s, uint64_t base);
 char*    itoa(uint64_t n, char* s, uint64_t b, uint64_t a);
 
 uint64_t fixed_point_ratio(uint64_t a, uint64_t b, uint64_t f);
@@ -340,6 +341,7 @@ uint64_t find_next_character();
 
 uint64_t is_character_letter();
 uint64_t is_character_digit();
+uint64_t is_character_digit_base(uint64_t base);
 uint64_t is_character_letter_or_digit_or_underscore();
 uint64_t is_character_not_double_quote_or_new_line_or_eof();
 
@@ -1917,7 +1919,12 @@ uint64_t string_compare(char* s, char* t) {
       return 0;
 }
 
+
 uint64_t atoi(char* s) {
+    return atoi_base(s, 10);
+}
+
+uint64_t atoi_base(char* s, uint64_t base) {
   uint64_t i;
   uint64_t n;
   uint64_t c;
@@ -1935,32 +1942,40 @@ uint64_t atoi(char* s) {
 
   // loop until s is terminated
   while (c != 0) {
-    // the numerical value of ASCII-encoded decimal digits
-    // is offset by the ASCII code of '0' (which is 48)
-    c = c - '0';
+    if (base <= 10) {
+      // the numerical value of ASCII-encoded decimal digits
+      // is offset by the ASCII code of '0' (which is 48)
+      c = c - '0';
+    } else
+        // for bases > 10, additional digits are encoded continuously
+        // starting with 'A'
+      if (c >= 'A')
+        c = c - 'A' + 10;
+      else
+        c = c - '0';
 
-    if (c > 9) {
-      printf2("%s: cannot convert non-decimal number %s\n", selfie_name, s);
+    if (c >= base) {
+      printf3("%s: cannot convert base %d number %s\n", selfie_name, (char*) base, s);
 
       exit(EXITCODE_BADARGUMENTS);
     }
 
-    // assert: s contains a decimal number
+    // assert: s contains a number in specified base
 
-    // use base 10 but detect wrap around
-    if (n < UINT64_MAX / 10)
-      n = n * 10 + c;
-    else if (n == UINT64_MAX / 10)
-      if (c <= UINT64_MAX % 10)
-        n = n * 10 + c;
+    // detect wrap around
+    if (n < UINT64_MAX / base)
+      n = n * base + c;
+    else if (n == UINT64_MAX / base)
+      if (c <= UINT64_MAX % base)
+        n = n * base + c;
       else {
-        // s contains a decimal number larger than UINT64_MAX
+        // s contains a number larger than UINT64_MAX
         printf2("%s: cannot convert out-of-bound number %s\n", selfie_name, s);
 
         exit(EXITCODE_BADARGUMENTS);
       }
     else {
-      // s contains a decimal number larger than UINT64_MAX
+      // s contains a number larger than UINT64_MAX
       printf2("%s: cannot convert out-of-bound number %s\n", selfie_name, s);
 
       exit(EXITCODE_BADARGUMENTS);
@@ -2626,6 +2641,22 @@ uint64_t is_character_digit() {
     return 0;
 }
 
+uint64_t is_character_digit_base(uint64_t base) {
+  if (is_character_digit()) 
+    if (character - '0' < base)
+      return 1;
+    else
+      return 0;
+  else 
+    if (character >= 'A')
+      if (character < 'A' + base - 10)
+        return 1;
+      else
+        return 0;
+    else
+      return 0; 
+}
+
 uint64_t is_character_letter_or_digit_or_underscore() {
   if (is_character_letter())
     return 1;
@@ -2680,6 +2711,7 @@ uint64_t identifier_or_keyword() {
 
 void get_symbol() {
   uint64_t i;
+  uint64_t base;
 
   // reset previously scanned symbol
   symbol = SYM_EOF;
@@ -2717,8 +2749,18 @@ void get_symbol() {
         integer = string_alloc(MAX_INTEGER_LENGTH);
 
         i = 0;
+        base = 10;
 
-        while (is_character_digit()) {
+        // check for 0x prefix indicating hexadecimal number
+        if (character == '0') {
+          get_character();
+          if (character == 'x') {
+            get_character();
+            base = 16;
+          } // other bases might go here...
+        } 
+
+        while (is_character_digit_base(base)) {
           if (i >= MAX_INTEGER_LENGTH) {
             if (integer_is_signed)
               syntax_error_message("signed integer out of bound");
@@ -2737,7 +2779,7 @@ void get_symbol() {
 
         store_character(integer, i, 0); // null-terminated string
 
-        literal = atoi(integer);
+        literal = atoi_base(integer, base);
 
         if (integer_is_signed)
           if (literal > INT64_MIN) {
