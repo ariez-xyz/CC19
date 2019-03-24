@@ -382,8 +382,10 @@ uint64_t SYM_EQUALITY     = 22; // ==
 uint64_t SYM_NOTEQ        = 23; // !=
 uint64_t SYM_LT           = 24; // <
 uint64_t SYM_LEQ          = 25; // <=
-uint64_t SYM_GT           = 26; // >
-uint64_t SYM_GEQ          = 27; // >=
+uint64_t SYM_LSHIFT       = 26; // <<
+uint64_t SYM_GT           = 27; // >
+uint64_t SYM_GEQ          = 28; // >=
+uint64_t SYM_RSHIFT       = 29; // >>
 
 // symbols for bootstrapping
 
@@ -588,6 +590,7 @@ uint64_t is_expression();
 uint64_t is_literal();
 uint64_t is_star_or_div_or_modulo();
 uint64_t is_plus_or_minus();
+uint64_t is_bitshift();
 uint64_t is_comparison();
 
 uint64_t look_for_factor();
@@ -616,6 +619,7 @@ uint64_t compile_call(char* procedure);
 uint64_t compile_factor();
 uint64_t compile_term();
 uint64_t compile_simple_expression();
+uint64_t compile_bitshift();
 uint64_t compile_expression();
 void     compile_while();
 void     compile_if();
@@ -2921,6 +2925,10 @@ void get_symbol() {
           get_character();
 
           symbol = SYM_LEQ;
+        } else if (character == CHAR_LT) {
+          get_character();
+
+          symbol = SYM_LSHIFT;
         } else
           symbol = SYM_LT;
 
@@ -2931,6 +2939,10 @@ void get_symbol() {
           get_character();
 
           symbol = SYM_GEQ;
+        } else if (character == CHAR_GT) {
+          get_character();
+          
+          symbol = SYM_RSHIFT;
         } else
           symbol = SYM_GT;
 
@@ -3170,6 +3182,15 @@ uint64_t is_plus_or_minus() {
   if (symbol == SYM_MINUS)
     return 1;
   else if (symbol == SYM_PLUS)
+    return 1;
+  else
+    return 0;
+}
+
+uint64_t is_bitshift() {
+  if (symbol == SYM_LSHIFT)
+    return 1;
+  else if (symbol == SYM_RSHIFT)
     return 1;
   else
     return 0;
@@ -3925,6 +3946,35 @@ uint64_t compile_simple_expression() {
   return ltype;
 }
 
+uint64_t compile_bitshift() {
+  uint64_t ltype;
+  uint64_t rtype;
+  uint64_t test;
+  
+  // assert: n = allocated_temporaries
+
+  ltype = compile_simple_expression();
+
+  // assert: allocated_temporaries == n + 1
+
+  // optional: <<, >> 
+  while (is_bitshift()) {
+    print_line_number("warning", line_number);
+    print("unsupported bitshift operator ignored\n");
+
+    get_symbol();
+
+    rtype = compile_simple_expression();
+
+    // just throws away right hand side
+    tfree(1);
+  }
+
+  // assert: allocated_temporaries == n + 1
+
+  return ltype;
+}
+
 uint64_t compile_expression() {
   uint64_t ltype;
   uint64_t operator_symbol;
@@ -3932,7 +3982,7 @@ uint64_t compile_expression() {
 
   // assert: n = allocated_temporaries
 
-  ltype = compile_simple_expression();
+  ltype = compile_bitshift();
 
   // assert: allocated_temporaries == n + 1
 
@@ -3942,7 +3992,7 @@ uint64_t compile_expression() {
 
     get_symbol();
 
-    rtype = compile_simple_expression();
+    rtype = compile_bitshift();
 
     // assert: allocated_temporaries == n + 2
 
