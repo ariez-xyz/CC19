@@ -455,8 +455,10 @@ void init_scanner () {
   *(SYMBOLS + SYM_NOTEQ)        = (uint64_t) "!=";
   *(SYMBOLS + SYM_LT)           = (uint64_t) "<";
   *(SYMBOLS + SYM_LEQ)          = (uint64_t) "<=";
+  *(SYMBOLS + SYM_LSHIFT)       = (uint64_t) "<<";
   *(SYMBOLS + SYM_GT)           = (uint64_t) ">";
   *(SYMBOLS + SYM_GEQ)          = (uint64_t) ">=";
+  *(SYMBOLS + SYM_RSHIFT)       = (uint64_t) ">>";
 
   *(SYMBOLS + SYM_INT)      = (uint64_t) "int";
   *(SYMBOLS + SYM_CHAR)     = (uint64_t) "char";
@@ -809,7 +811,7 @@ void     decode_u_format();
 uint64_t OP_LD     = 3;   // 0000011, I format (LD)
 uint64_t OP_IMM    = 19;  // 0010011, I format (ADDI, NOP)
 uint64_t OP_SD     = 35;  // 0100011, S format (SD)
-uint64_t OP_OP     = 51;  // 0110011, R format (ADD, SUB, MUL, DIVU, REMU, SLTU)
+uint64_t OP_OP     = 51;  // 0110011, R format (ADD, SUB, MUL, DIVU, REMU, SLTU, SLL, SRL)
 uint64_t OP_LUI    = 55;  // 0110111, U format (LUI)
 uint64_t OP_BRANCH = 99;  // 1100011, B format (BEQ)
 uint64_t OP_JALR   = 103; // 1100111, I format (JALR)
@@ -825,6 +827,8 @@ uint64_t F3_MUL   = 0; // 000
 uint64_t F3_DIVU  = 5; // 101
 uint64_t F3_REMU  = 7; // 111
 uint64_t F3_SLTU  = 3; // 011
+uint64_t F3_SLL   = 1; // 001
+uint64_t F3_SRL   = 5; // 101
 uint64_t F3_LD    = 3; // 011
 uint64_t F3_SD    = 3; // 011
 uint64_t F3_BEQ   = 0; // 000
@@ -838,6 +842,8 @@ uint64_t F7_SUB  = 32; // 0100000
 uint64_t F7_DIVU = 1;  // 0000001
 uint64_t F7_REMU = 1;  // 0000001
 uint64_t F7_SLTU = 0;  // 0000000
+uint64_t F7_SLL  = 0;  // 0000000
+uint64_t F7_SRL  = 0;  // 0000000
 
 // f12-codes (immediates)
 uint64_t F12_ECALL = 0; // 000000000000
@@ -882,6 +888,8 @@ void emit_mul(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_divu(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_remu(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_sltu(uint64_t rd, uint64_t rs1, uint64_t rs2);
+void emit_sll(uint64_t rd, uint64_t rs1, uint64_t rs2);
+void emit_srl(uint64_t rd, uint64_t rs1, uint64_t rs2);
 
 void emit_ld(uint64_t rd, uint64_t rs1, uint64_t immediate);
 void emit_sd(uint64_t rs1, uint64_t immediate, uint64_t rs2);
@@ -940,6 +948,8 @@ uint64_t ic_mul   = 0;
 uint64_t ic_divu  = 0;
 uint64_t ic_remu  = 0;
 uint64_t ic_sltu  = 0;
+uint64_t ic_sll   = 0;
+uint64_t ic_srl   = 0;
 uint64_t ic_ld    = 0;
 uint64_t ic_sd    = 0;
 uint64_t ic_beq   = 0;
@@ -1112,6 +1122,9 @@ void do_remu();
 
 void do_sltu();
 void zero_extend_sltu();
+
+void do_sll();
+void do_srl();
 
 void     print_ld();
 void     print_ld_before();
@@ -1299,12 +1312,14 @@ uint64_t MUL   = 5;
 uint64_t DIVU  = 6;
 uint64_t REMU  = 7;
 uint64_t SLTU  = 8;
-uint64_t LD    = 9;
-uint64_t SD    = 10;
-uint64_t BEQ   = 11;
-uint64_t JAL   = 12;
-uint64_t JALR  = 13;
-uint64_t ECALL = 14;
+uint64_t SLL   = 9;
+uint64_t SRL   = 10;
+uint64_t LD    = 11;
+uint64_t SD    = 12;
+uint64_t BEQ   = 13;
+uint64_t JAL   = 14;
+uint64_t JALR  = 15;
+uint64_t ECALL = 16;
 
 // exceptions
 
@@ -3948,6 +3963,7 @@ uint64_t compile_simple_expression() {
 
 uint64_t compile_bitshift() {
   uint64_t ltype;
+  uint64_t operator_symbol;
   uint64_t rtype;
   
   // assert: n = allocated_temporaries
@@ -3956,16 +3972,47 @@ uint64_t compile_bitshift() {
 
   // assert: allocated_temporaries == n + 1
 
-  // optional: <<, >> 
+  // << or >> ?
   while (is_bitshift()) {
-    print_line_number("warning", line_number);
-    print("unsupported bitshift operator ignored\n");
+    operator_symbol = symbol;
 
     get_symbol();
 
     rtype = compile_simple_expression();
 
-    // just throws away right hand side
+    // assert: allocated_temporaries == n + 2
+
+    if (operator_symbol == SYM_LSHIFT) {
+      if (ltype == UINT64_T) {
+        if (rtype == UINT64STAR_T) {
+          // UINT64_T << UINT64STAR_T
+          syntax_error_message("(uint64_t) << (uint64_t*) is undefined");
+        }
+      } else if (rtype == UINT64STAR_T)
+        // UINT64STAR_T << UINT64STAR_T
+        syntax_error_message("(uint64_t*) << (uint64_t*) is undefined");
+      else
+        // UINT64STAR_T << UINT64_T
+        syntax_error_message("(uint64_t*) << (uint64_t) is undefined");
+
+      emit_sll(previous_temporary(), previous_temporary(), current_temporary());
+
+    } else if (operator_symbol == SYM_RSHIFT) {
+      if (ltype == UINT64_T) {
+        if (rtype == UINT64STAR_T) {
+          // UINT64_T >> UINT64STAR_T
+          syntax_error_message("(uint64_t) >> (uint64_t*) is undefined");
+        }
+      } else if (rtype == UINT64STAR_T)
+        // UINT64STAR_T >> UINT64STAR_T
+        syntax_error_message("(uint64_t*) >> (uint64_t*) is undefined");
+      else
+        // UINT64STAR_T << UINT64_T
+        syntax_error_message("(uint64_t*) >> (uint64_t) is undefined");
+
+      emit_srl(previous_temporary(), previous_temporary(), current_temporary());
+    }
+
     tfree(1);
   }
 
@@ -5361,6 +5408,8 @@ void reset_instruction_counters() {
   ic_divu  = 0;
   ic_remu  = 0;
   ic_sltu  = 0;
+  ic_sll   = 0;
+  ic_srl   = 0;
   ic_ld    = 0;
   ic_sd    = 0;
   ic_beq   = 0;
@@ -5370,7 +5419,7 @@ void reset_instruction_counters() {
 }
 
 uint64_t get_total_number_of_instructions() {
-  return ic_lui + ic_addi + ic_add + ic_sub + ic_mul + ic_divu + ic_remu + ic_sltu + ic_ld + ic_sd + ic_beq + ic_jal + ic_jalr + ic_ecall;
+  return ic_lui + ic_addi + ic_add + ic_sub + ic_mul + ic_divu + ic_remu + ic_sltu + ic_sll + ic_srl + ic_ld + ic_sd + ic_beq + ic_jal + ic_jalr + ic_ecall;
 }
 
 void print_instruction_counter(uint64_t total, uint64_t counter, char* mnemonics) {
@@ -5411,6 +5460,10 @@ void print_instruction_counters() {
 
   printf1("%s: control: ", selfie_name);
   print_instruction_counter(ic, ic_sltu, "sltu");
+  print(", ");
+  print_instruction_counter(ic, ic_sll, "sll");
+  print(", ");
+  print_instruction_counter(ic, ic_srl, "srl");
   print(", ");
   print_instruction_counter(ic, ic_beq, "beq");
   print(", ");
@@ -5525,6 +5578,18 @@ void emit_sltu(uint64_t rd, uint64_t rs1, uint64_t rs2) {
   emit_instruction(encode_r_format(F7_SLTU, rs2, rs1, F3_SLTU, rd, OP_OP));
 
   ic_sltu = ic_sltu + 1;
+}
+
+void emit_sll(uint64_t rd, uint64_t rs1, uint64_t rs2) {
+  emit_instruction(encode_r_format(F7_SLL, rs2, rs1, F3_SLL, rd, OP_OP));
+
+  ic_sll = ic_sll + 1;
+}
+
+void emit_srl(uint64_t rd, uint64_t rs1, uint64_t rs2) {
+  emit_instruction(encode_r_format(F7_SRL, rs2, rs1, F3_SRL, rd, OP_OP));
+
+  ic_srl = ic_srl + 1;
 }
 
 void emit_ld(uint64_t rd, uint64_t rs1, uint64_t immediate) {
@@ -6920,6 +6985,26 @@ void zero_extend_sltu() {
       *(reg_sym + rd) = (uint64_t) smt_unary(bv_zero_extension(1), (char*) *(reg_sym + rd));
 }
 
+void do_sll() {
+  if (rd != REG_ZR)
+    // semantics of left shift
+    *(registers + rd) = *(registers + rs1) << *(registers + rs2);
+
+  pc = pc + INSTRUCTIONSIZE;
+
+  ic_sll = ic_sll + 1;
+}
+
+void do_srl() {
+  if (rd != REG_ZR)
+    // semantics of right shift
+    *(registers + rd) = *(registers + rs1) >> *(registers + rs2);
+
+  pc = pc + INSTRUCTIONSIZE;
+
+  ic_srl = ic_srl + 1;
+}
+
 void print_ld() {
   print_code_context_for_instruction(pc);
   printf3("ld %s,%d(%s)", get_register_name(rd), (char*) imm, get_register_name(rs1));
@@ -7732,7 +7817,7 @@ void decode() {
 
     if (funct3 == F3_SD)
       is = SD;
-  } else if (opcode == OP_OP) { // could be ADD, SUB, MUL, DIVU, REMU, SLTU
+  } else if (opcode == OP_OP) { // could be ADD, SUB, MUL, DIVU, REMU, SLTU, SLL, SRL
     decode_r_format();
 
     if (funct3 == F3_ADD) { // = F3_SUB = F3_MUL
@@ -7742,16 +7827,21 @@ void decode() {
         is = SUB;
       else if (funct7 == F7_MUL)
         is = MUL;
-    } else if (funct3 == F3_DIVU) {
+    } else if (funct3 == F3_DIVU) { // = F3_SRL
       if (funct7 == F7_DIVU)
         is = DIVU;
+      else if (funct7 == F7_SRL)
+        is = SRL;
     } else if (funct3 == F3_REMU) {
       if (funct7 == F7_REMU)
         is = REMU;
     } else if (funct3 == F3_SLTU) {
       if (funct7 == F7_SLTU)
         is = SLTU;
-    }
+    } else if (funct3 == F3_SLL) {
+      if (funct7 == F7_SLL)
+        is = SLL;
+    } 
   } else if (opcode == OP_BRANCH) {
     decode_b_format();
 
@@ -7778,7 +7868,7 @@ void decode() {
   }
 
   if (is == 0) {
-    if (run)
+    if (run)  
       throw_exception(EXCEPTION_UNKNOWNINSTRUCTION, 0);
     else {
       //report the error on the console
@@ -7822,6 +7912,10 @@ void execute() {
     do_remu();
   else if (is == SLTU)
     do_sltu();
+  else if (is == SLL)
+    do_sll();
+  else if (is == SRL)
+    do_srl();
   else if (is == BEQ)
     do_beq();
   else if (is == JAL)
