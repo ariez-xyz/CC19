@@ -24,4 +24,4 @@ _decode_
 
 _do_
 1. in execute() an die richtige Stelle bringen
-2, do-methode fuer and, or, xori einbauen
+2. do-methode fuer and, or, xori einbauen

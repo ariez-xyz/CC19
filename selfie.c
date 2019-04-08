@@ -395,9 +395,9 @@ uint64_t SYM_AND          = 32; // &
 
 // symbols for bootstrapping
 
-uint64_t SYM_INT      = 28; // int
-uint64_t SYM_CHAR     = 29; // char
-uint64_t SYM_UNSIGNED = 30; // unsigned
+uint64_t SYM_INT      = 33; // int
+uint64_t SYM_CHAR     = 34; // char
+uint64_t SYM_UNSIGNED = 35; // unsigned
 
 uint64_t* SYMBOLS; // strings representing symbols
 
@@ -834,6 +834,7 @@ uint64_t OP_SYSTEM = 115; // 1110011, I format (ECALL)
 // f3-codes
 uint64_t F3_NOP   = 0; // 000
 uint64_t F3_ADDI  = 0; // 000
+uint64_t F3_XORI  = 4; // 100
 uint64_t F3_ADD   = 0; // 000
 uint64_t F3_SUB   = 0; // 000
 uint64_t F3_MUL   = 0; // 000
@@ -842,6 +843,8 @@ uint64_t F3_REMU  = 7; // 111
 uint64_t F3_SLTU  = 3; // 011
 uint64_t F3_SLL   = 1; // 001
 uint64_t F3_SRL   = 5; // 101
+uint64_t F3_AND   = 7; // 110
+uint64_t F3_OR    = 6; // 111
 uint64_t F3_LD    = 3; // 011
 uint64_t F3_SD    = 3; // 011
 uint64_t F3_BEQ   = 0; // 000
@@ -857,6 +860,8 @@ uint64_t F7_REMU = 1;  // 0000001
 uint64_t F7_SLTU = 0;  // 0000000
 uint64_t F7_SLL  = 0;  // 0000000
 uint64_t F7_SRL  = 0;  // 0000000
+uint64_t F7_AND  = 0;  // 0000000
+uint64_t F7_OR   = 0;  // 0000000
 
 // f12-codes (immediates)
 uint64_t F12_ECALL = 0; // 000000000000
@@ -894,6 +899,7 @@ void emit_nop();
 
 void emit_lui(uint64_t rd, uint64_t immediate);
 void emit_addi(uint64_t rd, uint64_t rs1, uint64_t immediate);
+void emit_xori(uint64_t rd, uint64_t rs1, uint64_t immediate);
 
 void emit_add(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_sub(uint64_t rd, uint64_t rs1, uint64_t rs2);
@@ -903,6 +909,8 @@ void emit_remu(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_sltu(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_sll(uint64_t rd, uint64_t rs1, uint64_t rs2);
 void emit_srl(uint64_t rd, uint64_t rs1, uint64_t rs2);
+void emit_and(uint64_t rd, uint64_t rs1, uint64_t rs2);
+void emit_or(uint64_t rd, uint64_t rs1, uint64_t rs2);
 
 void emit_ld(uint64_t rd, uint64_t rs1, uint64_t immediate);
 void emit_sd(uint64_t rs1, uint64_t immediate, uint64_t rs2);
@@ -955,6 +963,7 @@ uint64_t ELF_ENTRY_POINT = 65536; // = 0x10000 (address of beginning of code)
 
 uint64_t ic_lui   = 0;
 uint64_t ic_addi  = 0;
+uint64_t ic_xori  = 0;
 uint64_t ic_add   = 0;
 uint64_t ic_sub   = 0;
 uint64_t ic_mul   = 0;
@@ -963,6 +972,8 @@ uint64_t ic_remu  = 0;
 uint64_t ic_sltu  = 0;
 uint64_t ic_sll   = 0;
 uint64_t ic_srl   = 0;
+uint64_t ic_and   = 0;
+uint64_t ic_or    = 0;
 uint64_t ic_ld    = 0;
 uint64_t ic_sd    = 0;
 uint64_t ic_beq   = 0;
@@ -3285,6 +3296,8 @@ uint64_t look_for_factor() {
     return 0;
   else if (symbol == SYM_LPARENTHESIS)
     return 0;
+  else if (symbol == SYM_NOT)
+    return 0;
   else if (symbol == SYM_EOF)
     return 0;
   else
@@ -3733,6 +3746,7 @@ uint64_t compile_factor() {
   uint64_t cast;
   uint64_t type;
   uint64_t negative;
+  uint64_t bitwise_not;
   uint64_t dereference;
   char* variable_or_procedure_name;
 
@@ -3789,6 +3803,14 @@ uint64_t compile_factor() {
     integer_is_signed = 0;
   } else
     negative = 0;
+
+  // optional: ~
+  if (symbol == SYM_NOT) {
+    bitwise_not = 1;
+
+    get_symbol();
+  } else
+    bitwise_not = 0;
 
   // optional: dereference
   if (symbol == SYM_ASTERISK) {
@@ -3874,6 +3896,14 @@ uint64_t compile_factor() {
     type = UINT64_T;
   }
 
+  if (bitwise_not) {
+    if (type != UINT64_T)
+      type_warning(UINT64_T, type);
+
+    // bitwise not
+    emit_xori(current_temporary(), current_temporary(), -1);
+  }
+
   if (negative) {
     if (type != UINT64_T) {
       type_warning(UINT64_T, type);
@@ -3884,8 +3914,6 @@ uint64_t compile_factor() {
     emit_sub(current_temporary(), REG_ZR, current_temporary());
   }
   
-  // TODO: emit_not goes here (I guess)
-
   // assert: allocated_temporaries == n + 1
 
   if (has_cast)
@@ -4153,6 +4181,7 @@ uint64_t compile_bitwise_and() {
 
   // assert: allocated_temporaries == n + 1
 
+  // logical and ?
   while (is_logicaland()) {
     get_symbol();
 
@@ -4172,8 +4201,8 @@ uint64_t compile_bitwise_and() {
       // UINT64STAR_T << UINT64_T
       syntax_error_message("(uint64_t*) | (uint64_t) is undefined");
 
-    //TODO: write emit for this and logical or
-    emit_srl(previous_temporary(), previous_temporary(), current_temporary());
+    //-TODO write emit for this and logical or
+    emit_and(previous_temporary(), previous_temporary(), current_temporary());
 
 
     tfree(1);
@@ -4194,7 +4223,7 @@ uint64_t compile_expression() {
 
   // assert: allocated_temporaries == n + 1
 
-  // << or >> ?
+  // logical or ?
   while (is_logicalor()) {
     get_symbol();
 
@@ -4214,7 +4243,7 @@ uint64_t compile_expression() {
       // UINT64STAR_T << UINT64_T
       syntax_error_message("(uint64_t*) | (uint64_t) is undefined");
 
-    emit_sll(previous_temporary(), previous_temporary(), current_temporary());
+    emit_or(previous_temporary(), previous_temporary(), current_temporary());
 
 
     tfree(1);
@@ -4668,7 +4697,7 @@ uint64_t compile_initialization(uint64_t type) {
     } else
       initial_value = literal;
 
-    // TODO: optional ~
+    //-TODO optional ~
 
     if (is_literal())
       get_symbol();
@@ -5530,6 +5559,7 @@ void decode_u_format() {
 void reset_instruction_counters() {
   ic_lui   = 0;
   ic_addi  = 0;
+  ic_xori  = 0;
   ic_add   = 0;
   ic_sub   = 0;
   ic_mul   = 0;
@@ -5538,6 +5568,8 @@ void reset_instruction_counters() {
   ic_sltu  = 0;
   ic_sll   = 0;
   ic_srl   = 0;
+  ic_and   = 0;
+  ic_or    = 0;
   ic_ld    = 0;
   ic_sd    = 0;
   ic_beq   = 0;
@@ -5547,7 +5579,7 @@ void reset_instruction_counters() {
 }
 
 uint64_t get_total_number_of_instructions() {
-  return ic_lui + ic_addi + ic_add + ic_sub + ic_mul + ic_divu + ic_remu + ic_sltu + ic_sll + ic_srl + ic_ld + ic_sd + ic_beq + ic_jal + ic_jalr + ic_ecall;
+  return ic_lui + ic_addi + ic_xori + ic_add + ic_sub + ic_mul + ic_divu + ic_remu + ic_sltu + ic_sll + ic_srl + ic_and + ic_or + ic_ld + ic_sd + ic_beq + ic_jal + ic_jalr + ic_ecall;
 }
 
 void print_instruction_counter(uint64_t total, uint64_t counter, char* mnemonics) {
@@ -5566,6 +5598,8 @@ void print_instruction_counters() {
   print_instruction_counter(ic, ic_lui, "lui");
   print(", ");
   print_instruction_counter(ic, ic_addi, "addi");
+  print(", ");
+  print_instruction_counter(ic, ic_addi, "xori");
   println();
 
   printf1("%s: memory:  ", selfie_name);
@@ -5592,6 +5626,10 @@ void print_instruction_counters() {
   print_instruction_counter(ic, ic_sll, "sll");
   print(", ");
   print_instruction_counter(ic, ic_srl, "srl");
+  print(", ");
+  print_instruction_counter(ic, ic_srl, "and");
+  print(", ");
+  print_instruction_counter(ic, ic_srl, "or");
   print(", ");
   print_instruction_counter(ic, ic_beq, "beq");
   print(", ");
@@ -5672,6 +5710,12 @@ void emit_addi(uint64_t rd, uint64_t rs1, uint64_t immediate) {
   ic_addi = ic_addi + 1;
 }
 
+void emit_xori(uint64_t rd, uint64_t rs1, uint64_t immediate) {
+  emit_instruction(encode_i_format(immediate, rs1, F3_XORI, rd, OP_IMM));
+
+  ic_xori = ic_xori + 1;
+}
+
 void emit_add(uint64_t rd, uint64_t rs1, uint64_t rs2) {
   emit_instruction(encode_r_format(F7_ADD, rs2, rs1, F3_ADD, rd, OP_OP));
 
@@ -5716,6 +5760,18 @@ void emit_sll(uint64_t rd, uint64_t rs1, uint64_t rs2) {
 
 void emit_srl(uint64_t rd, uint64_t rs1, uint64_t rs2) {
   emit_instruction(encode_r_format(F7_SRL, rs2, rs1, F3_SRL, rd, OP_OP));
+
+  ic_srl = ic_srl + 1;
+}
+
+void emit_and(uint64_t rd, uint64_t rs1, uint64_t rs2) {
+  emit_instruction(encode_r_format(F7_AND, rs2, rs1, F3_AND, rd, OP_OP));
+
+  ic_srl = ic_srl + 1;
+}
+
+void emit_or(uint64_t rd, uint64_t rs1, uint64_t rs2) {
+  emit_instruction(encode_r_format(F7_OR, rs2, rs1, F3_OR, rd, OP_OP));
 
   ic_srl = ic_srl + 1;
 }

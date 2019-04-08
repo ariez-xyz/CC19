@@ -9593,10 +9593,12 @@ int main(int argc, char** argv) {
 
   //test = ~test;
   //printf1("~ test = %d (correct: -6)\n", (char*)test);
-  test = test & 1;
+  test = test & 70;
   printf1("& test = %d (correct: 66)\n", (char*)test);
-  test = test | 2;
+  test = test | 70;
   printf1("| test = %d (correct: 70)\n", (char*)test);
+  test = ~70;
+  printf1("~ test = %d (correct: ?)\n", (char*)test);
 
   print("\n\n\n------ END TEST.C OUTPUT\n\n\n");
 

@@ -35,7 +35,7 @@ letter = "a" | ... | "z" | "A" | ... | "Z" .
 C\* Grammar:
 
 ```
-cstar            = { type identifier [ "=" [ cast ] [ "-" ] [ "~" ] literal ] ";" |
+cstar            = { type identifier [ "=" [ cast ] [ "-" ] literal ] ";" |
                    ( "void" | type ) identifier procedure } .
 
 type             = "uint64_t" [ "*" ] .
@@ -67,7 +67,7 @@ simpleExpression = term { ( "+" | "-" ) term } .
 
 term             = factor { ( "*" | "/" | "%" ) factor } .
 
-factor           = [ cast ] [ "-" ] [ "*" ] [ "~" ]
+factor           = [ cast ] [ "-" ] [ "~" ] [ "*" ]
                     ( identifier | call | literal | string | "(" expression ")" ) .
 
 while            = "while" "(" expression ")"
