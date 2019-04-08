@@ -9581,9 +9581,24 @@ uint64_t selfie() {
 
 // selfie bootstraps int and char** to uint64_t and uint64_t*, respectively!
 int main(int argc, char** argv) {
+  uint64_t test;
+  test = 5;
+
   init_selfie((uint64_t) argc, (uint64_t*) argv);
 
   init_library();
+
+  print("\n\n------ BEGIN TEST.C OUTPUT\n\n\n");
+  // test code goes here...
+
+  //test = ~test;
+  //printf1("~ test = %d (correct: -6)\n", (char*)test);
+  test = test & 1;
+  printf1("& test = %d (correct: 66)\n", (char*)test);
+  test = test | 2;
+  printf1("| test = %d (correct: 70)\n", (char*)test);
+
+  print("\n\n\n------ END TEST.C OUTPUT\n\n\n");
 
   return selfie();
 }

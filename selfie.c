@@ -209,6 +209,9 @@ uint64_t CHAR_EQUAL        = '=';
 uint64_t CHAR_EXCLAMATION  = '!';
 uint64_t CHAR_LT           = '<';
 uint64_t CHAR_GT           = '>';
+uint64_t CHAR_TILDE        = '~';
+uint64_t CHAR_AMPERSAND    = '&';
+uint64_t CHAR_BAR          = '|';
 uint64_t CHAR_BACKSLASH    =  92; // ASCII code 92 = backslash
 
 uint64_t CPUBITWIDTH = 64;
@@ -386,6 +389,9 @@ uint64_t SYM_LSHIFT       = 26; // <<
 uint64_t SYM_GT           = 27; // >
 uint64_t SYM_GEQ          = 28; // >=
 uint64_t SYM_RSHIFT       = 29; // >>
+uint64_t SYM_NOT          = 30; // ~
+uint64_t SYM_OR           = 31; // |
+uint64_t SYM_AND          = 32; // &
 
 // symbols for bootstrapping
 
@@ -459,6 +465,9 @@ void init_scanner () {
   *(SYMBOLS + SYM_GT)           = (uint64_t) ">";
   *(SYMBOLS + SYM_GEQ)          = (uint64_t) ">=";
   *(SYMBOLS + SYM_RSHIFT)       = (uint64_t) ">>";
+  *(SYMBOLS + SYM_NOT)          = (uint64_t) "~";
+  *(SYMBOLS + SYM_OR)           = (uint64_t) "|";
+  *(SYMBOLS + SYM_AND)          = (uint64_t) "&";
 
   *(SYMBOLS + SYM_INT)      = (uint64_t) "int";
   *(SYMBOLS + SYM_CHAR)     = (uint64_t) "char";
@@ -593,6 +602,8 @@ uint64_t is_literal();
 uint64_t is_star_or_div_or_modulo();
 uint64_t is_plus_or_minus();
 uint64_t is_bitshift();
+uint64_t is_logicalor();
+uint64_t is_logicaland();
 uint64_t is_comparison();
 
 uint64_t look_for_factor();
@@ -623,6 +634,8 @@ uint64_t compile_term();
 uint64_t compile_simple_expression();
 uint64_t compile_bitshift();
 uint64_t compile_expression();
+uint64_t compile_bitwise_and();
+uint64_t compile_comparison();
 void     compile_while();
 void     compile_if();
 void     compile_return();
@@ -2961,6 +2974,21 @@ void get_symbol() {
         } else
           symbol = SYM_GT;
 
+      } else if (character == CHAR_AMPERSAND) {
+          get_character();
+
+          symbol = SYM_AND;
+
+      } else if (character == CHAR_BAR) {
+          get_character();
+
+          symbol = SYM_OR;
+
+      } else if (character == CHAR_TILDE) {
+          get_character();
+
+          symbol = SYM_NOT;
+
       } else {
         print_line_number("syntax error", line_number);
         print("found unknown character ");
@@ -3206,6 +3234,20 @@ uint64_t is_bitshift() {
   if (symbol == SYM_LSHIFT)
     return 1;
   else if (symbol == SYM_RSHIFT)
+    return 1;
+  else
+    return 0;
+}
+
+uint64_t is_logicalor() {
+  if (symbol == SYM_OR)
+    return 1;
+  else
+    return 0;
+}
+
+uint64_t is_logicaland() {
+  if (symbol == SYM_AND)
     return 1;
   else
     return 0;
@@ -3841,6 +3883,8 @@ uint64_t compile_factor() {
 
     emit_sub(current_temporary(), REG_ZR, current_temporary());
   }
+  
+  // TODO: emit_not goes here (I guess)
 
   // assert: allocated_temporaries == n + 1
 
@@ -4021,7 +4065,7 @@ uint64_t compile_bitshift() {
   return ltype;
 }
 
-uint64_t compile_expression() {
+uint64_t compile_comparison() {
   uint64_t ltype;
   uint64_t operator_symbol;
   uint64_t rtype;
@@ -4092,6 +4136,88 @@ uint64_t compile_expression() {
 
       tfree(1);
     }
+  }
+
+  // assert: allocated_temporaries == n + 1
+
+  return ltype;
+}
+
+uint64_t compile_bitwise_and() {
+  uint64_t ltype;
+  uint64_t rtype;
+  
+  // assert: n = allocated_temporaries
+
+  ltype = compile_comparison();
+
+  // assert: allocated_temporaries == n + 1
+
+  while (is_logicaland()) {
+    get_symbol();
+
+    rtype = compile_comparison();
+
+    // assert: allocated_temporaries == n + 2
+
+    if (ltype == UINT64_T) {
+      if (rtype == UINT64STAR_T) {
+        // UINT64_T << UINT64STAR_T
+        syntax_error_message("(uint64_t) | (uint64_t*) is undefined");
+      }
+    } else if (rtype == UINT64STAR_T)
+      // UINT64STAR_T << UINT64STAR_T
+      syntax_error_message("(uint64_t*) | (uint64_t*) is undefined");
+    else
+      // UINT64STAR_T << UINT64_T
+      syntax_error_message("(uint64_t*) | (uint64_t) is undefined");
+
+    //TODO: write emit for this and logical or
+    emit_srl(previous_temporary(), previous_temporary(), current_temporary());
+
+
+    tfree(1);
+  }
+
+  // assert: allocated_temporaries == n + 1
+
+  return ltype;
+}
+
+uint64_t compile_expression() {
+  uint64_t ltype;
+  uint64_t rtype;
+  
+  // assert: n = allocated_temporaries
+
+  ltype = compile_bitwise_and();
+
+  // assert: allocated_temporaries == n + 1
+
+  // << or >> ?
+  while (is_logicalor()) {
+    get_symbol();
+
+    rtype = compile_bitwise_and();
+
+    // assert: allocated_temporaries == n + 2
+
+    if (ltype == UINT64_T) {
+      if (rtype == UINT64STAR_T) {
+        // UINT64_T << UINT64STAR_T
+        syntax_error_message("(uint64_t) | (uint64_t*) is undefined");
+      }
+    } else if (rtype == UINT64STAR_T)
+      // UINT64STAR_T << UINT64STAR_T
+      syntax_error_message("(uint64_t*) | (uint64_t*) is undefined");
+    else
+      // UINT64STAR_T << UINT64_T
+      syntax_error_message("(uint64_t*) | (uint64_t) is undefined");
+
+    emit_sll(previous_temporary(), previous_temporary(), current_temporary());
+
+
+    tfree(1);
   }
 
   // assert: allocated_temporaries == n + 1
@@ -4541,6 +4667,8 @@ uint64_t compile_initialization(uint64_t type) {
       initial_value = -literal;
     } else
       initial_value = literal;
+
+    // TODO: optional ~
 
     if (is_literal())
       get_symbol();

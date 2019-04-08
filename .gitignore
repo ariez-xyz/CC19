@@ -1,3 +1,7 @@
-*.m
-*.s
+*__pycache__*
+/*.m
+/*.s
+/*.t
 selfie
+selfie.exe
+manuscript/code/*.t

@@ -35,7 +35,7 @@ letter = "a" | ... | "z" | "A" | ... | "Z" .
 C\* Grammar:
 
 ```
-cstar            = { type identifier [ "=" [ cast ] [ "-" ] literal ] ";" |
+cstar            = { type identifier [ "=" [ cast ] [ "-" ] [ "~" ] literal ] ";" |
                    ( "void" | type ) identifier procedure } .
 
 type             = "uint64_t" [ "*" ] .
@@ -55,7 +55,11 @@ statement        = call ";" | while | if | return ";" |
 
 call             = identifier "(" [ expression { "," expression } ] ")" .
 
-expression       = bitshift [ ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) bitshift ] .
+expression       = bitwiseAnd [ "|" bitwiseAnd ] .
+
+bitwiseAnd       = comparison [ "&" comparison ] .
+
+comparison       = bitshift [ ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) bitshift ] .
 
 bitshift         = simpleExpression [ ( "<<" | ">>" ) simpleExpression ] .
 
@@ -63,7 +67,7 @@ simpleExpression = term { ( "+" | "-" ) term } .
 
 term             = factor { ( "*" | "/" | "%" ) factor } .
 
-factor           = [ cast ] [ "-" ] [ "*" ]
+factor           = [ cast ] [ "-" ] [ "*" ] [ "~" ]
                     ( identifier | call | literal | string | "(" expression ")" ) .
 
 while            = "while" "(" expression ")"
