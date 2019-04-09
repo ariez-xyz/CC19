@@ -843,8 +843,8 @@ uint64_t F3_REMU  = 7; // 111
 uint64_t F3_SLTU  = 3; // 011
 uint64_t F3_SLL   = 1; // 001
 uint64_t F3_SRL   = 5; // 101
-uint64_t F3_AND   = 7; // 110
-uint64_t F3_OR    = 6; // 111
+uint64_t F3_OR    = 6; // 110
+uint64_t F3_AND   = 7; // 111
 uint64_t F3_LD    = 3; // 011
 uint64_t F3_SD    = 3; // 011
 uint64_t F3_BEQ   = 0; // 000
@@ -1128,6 +1128,7 @@ void print_addi_before();
 void print_addi_add_sub_mul_divu_remu_sltu_after();
 void do_addi();
 void constrain_addi();
+void do_xori();
 
 void print_add_sub_mul_divu_remu_sltu(char *mnemonics);
 void print_add_sub_mul_divu_remu_sltu_before();
@@ -1149,6 +1150,9 @@ void zero_extend_sltu();
 
 void do_sll();
 void do_srl();
+
+void do_and();
+void do_or();
 
 void     print_ld();
 void     print_ld_before();
@@ -1344,6 +1348,9 @@ uint64_t BEQ   = 13;
 uint64_t JAL   = 14;
 uint64_t JALR  = 15;
 uint64_t ECALL = 16;
+uint64_t XORI  = 17;
+uint64_t AND   = 18;
+uint64_t OR    = 19;
 
 // exceptions
 
@@ -7044,6 +7051,18 @@ void constrain_addi() {
   }
 }
 
+void do_xori() {
+  // xor immediate
+
+  if (rd != REG_ZR)
+    // semantics of xori (implemented via equivalency to avoid having to implement ^ operator)
+    *(registers + rd) = (*(registers + rs1) | imm) & ~(*(registers + rs1) & imm); 
+
+  pc = pc + INSTRUCTIONSIZE;
+
+  ic_xori = ic_xori + 1;
+}
+
 void print_add_sub_mul_divu_remu_sltu(char *mnemonics) {
   print_code_context_for_instruction(pc);
   printf4("%s %s,%s,%s", mnemonics, get_register_name(rd), get_register_name(rs1), get_register_name(rs2));
@@ -7187,6 +7206,26 @@ void do_srl() {
   pc = pc + INSTRUCTIONSIZE;
 
   ic_srl = ic_srl + 1;
+}
+
+void do_and() {
+  if (rd != REG_ZR)
+    // semantics of or
+    *(registers + rd) = *(registers + rs1) & *(registers + rs2);
+
+  pc = pc + INSTRUCTIONSIZE;
+
+  ic_and = ic_and + 1;
+}
+
+void do_or() {
+  if (rd != REG_ZR)
+    // semantics of or
+    *(registers + rd) = *(registers + rs1) | *(registers + rs2);
+
+  pc = pc + INSTRUCTIONSIZE;
+
+  ic_or = ic_or + 1;
 }
 
 void print_ld() {
@@ -7991,6 +8030,8 @@ void decode() {
 
     if (funct3 == F3_ADDI)
       is = ADDI;
+    else if (funct3 == F3_XORI)
+      is = XORI;
   } else if (opcode == OP_LD) {
     decode_i_format();
 
@@ -8016,15 +8057,20 @@ void decode() {
         is = DIVU;
       else if (funct7 == F7_SRL)
         is = SRL;
-    } else if (funct3 == F3_REMU) {
+    } else if (funct3 == F3_REMU) { // = F3_AND
       if (funct7 == F7_REMU)
         is = REMU;
+      else if (funct7 == F7_AND)
+        is = AND;
     } else if (funct3 == F3_SLTU) {
       if (funct7 == F7_SLTU)
         is = SLTU;
     } else if (funct3 == F3_SLL) {
       if (funct7 == F7_SLL)
         is = SLL;
+    } else if (funct3 == F3_OR) {
+      if (funct7 == F7_OR)
+        is = OR;
     } 
   } else if (opcode == OP_BRANCH) {
     decode_b_format();
@@ -8080,6 +8126,8 @@ void execute() {
   // assert: 1 <= is <= number of RISC-U instructions
   if (is == ADDI)
     do_addi();
+  else if (is == XORI)
+    do_xori();
   else if (is == LD)
     do_ld();
   else if (is == SD)
@@ -8100,6 +8148,10 @@ void execute() {
     do_sll();
   else if (is == SRL)
     do_srl();
+  else if (is == OR)
+    do_or();
+  else if (is == AND)
+    do_and();
   else if (is == BEQ)
     do_beq();
   else if (is == JAL)
