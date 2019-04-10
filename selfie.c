@@ -4208,9 +4208,7 @@ uint64_t compile_bitwise_and() {
       // UINT64STAR_T << UINT64_T
       syntax_error_message("(uint64_t*) | (uint64_t) is undefined");
 
-    //-TODO write emit for this and logical or
     emit_and(previous_temporary(), previous_temporary(), current_temporary());
-
 
     tfree(1);
   }
