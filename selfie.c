@@ -4210,7 +4210,6 @@ uint64_t compile_bitwise_and() {
 
     emit_and(previous_temporary(), previous_temporary(), current_temporary());
 
-
     tfree(1);
   }
 
@@ -4702,6 +4701,8 @@ uint64_t compile_initialization(uint64_t type) {
       initial_value = -literal;
     } else
       initial_value = literal;
+
+    //-TODO optional ~
 
     if (is_literal())
       get_symbol();

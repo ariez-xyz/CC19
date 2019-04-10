@@ -26,6 +26,8 @@ number_of_positive_tests_failed = [0]
 number_of_negative_tests_passed = [0]
 number_of_negative_tests_failed = [0]
 
+failed_mandatory_test = False
+
 home_path = ''
 
 INSTRUCTIONSIZE = 4  # in bytes
@@ -33,17 +35,23 @@ REGISTERSIZE    = 8  # in bytes
 
 OP_OP  = 51
 OP_AMO = 47
+OP_IMM = 19
 
-F3_SLL = 1
-F3_SRL = 5
-F3_LR  = 3
-F3_SC  = 3
+F3_SLL  = 1
+F3_SRL  = 5
+F3_OR   = 6
+F3_AND  = 7
+F3_XORI = 4
+F3_LR   = 3
+F3_SC   = 3
 
 F5_LR  = 2
 F5_SC  = 3
 
 F7_SLL = 0
 F7_SRL = 0
+F7_AND = 0
+F7_OR  = 0
 
 def read_instruction(file):
   b = file.read(INSTRUCTIONSIZE)
@@ -61,21 +69,35 @@ def read_data(file):
 
   return struct.unpack('<Q', b)[0]
 
+def encode_i_format(immediate, funct3, opcode):
+  return ((((immediate << 5) << 3) + funct3 << 5) << 7) + opcode
+
 def encode_r_format(funct7, funct3, opcode):
   return (((((funct7 << 5) << 5) << 3) + funct3 << 5) << 7) + opcode
 
 def encode_amo_format(funct5, funct3):
   return (((((funct5 << 7) << 5) << 3) + funct3 << 5) << 7) + OP_AMO
 
+NOT_FORMAT_MASK = 0b11111111111100000111000001111111
 R_FORMAT_MASK   = 0b11111110000000000111000001111111
 AMO_FORMAT_MASK = 0b11111000000000000111000001111111
 LR_FORMAT_MASK  = 0b11111001111100000111000001111111
 
 SLL_INSTRUCTION = encode_r_format(F7_SLL, F3_SLL, OP_OP)
 SRL_INSTRUCTION = encode_r_format(F7_SRL, F3_SRL, OP_OP)
+OR_INSTRUCTION  = encode_r_format(F7_OR, F3_OR, OP_OP)
+AND_INSTRUCTION = encode_r_format(F7_AND, F3_AND, OP_OP)
+NOT_INSTRUCTION = encode_i_format(4095, F3_XORI, OP_IMM)
 
 LR_INSTRUCTION = encode_amo_format(F5_LR, F3_LR)
 SC_INSTRUCTION = encode_amo_format(F5_SC, F3_SC)
+
+class DummyWriter:
+  def __getattr__( self, name ):
+    return sys.__stdout__.__getattribute__(name)
+
+  def write(self, text):
+    return
 
 def print_passed(msg):
   print("\033[92m[PASSED]\033[0m " + msg)
@@ -94,23 +116,36 @@ def filter_status_messages(selfie_output):
   return re.sub(r'([a-zA-Z]:\\|(./)?selfie)[^\n]*\n', '', selfie_output).replace('\n', '')
 
 
-def record_result(result, msg, output, warning, should_succeed=True, command=None):
+def record_result(result, msg, output, warning, should_succeed=True, command=None, mandatory=False):
   global number_of_positive_tests_passed, number_of_positive_tests_failed
   global number_of_negative_tests_passed, number_of_negative_tests_failed
+  global failed_mandatory_test
 
-  if result == True:
+  if result:
     if should_succeed:
-      number_of_positive_tests_passed[-1] += 1
+      if not mandatory:
+        number_of_positive_tests_passed[-1] += 1
+      
       print_passed(msg)
     else:
-      number_of_negative_tests_failed[-1] += 1
+      if mandatory:
+        failed_mandatory_test = True
+      else:
+        number_of_negative_tests_failed[-1] += 1
+      
       print_failed(msg, warning, output, command)
   else:
     if should_succeed:
-      number_of_positive_tests_failed[-1] += 1
+      if mandatory:
+        failed_mandatory_test = True
+      else:
+        number_of_positive_tests_failed[-1] += 1
+      
       print_failed(msg, warning, output, command)
     else:
-      number_of_negative_tests_passed[-1] += 1
+      if not mandatory:
+        number_of_negative_tests_passed[-1] += 1
+      
       print_passed(msg)
 
 
@@ -118,10 +153,13 @@ def execute(command):
   command = command.replace('grader/', home_path + 'grader/')
   command = command.replace('manuscript/code/', home_path + 'manuscript/code/')
 
-  process = Popen(command, stdout=PIPE, shell=True)
-  output = process.communicate()[0].decode(sys.stdout.encoding)
+  process = Popen(command, stdout=PIPE, stderr=PIPE, shell=True)
+  stdoutdata, stderrdata = process.communicate()
+  
+  output = stdoutdata.decode(sys.stdout.encoding)
+  error_output = stderrdata.decode(sys.stderr.encoding)
 
-  return (process.returncode, output)
+  return (process.returncode, output, error_output)
 
 
 def set_up():
@@ -145,47 +183,72 @@ def has_compiled(returncode, output, should_succeed=True):
   return (succeeded, warning)
 
 
+def has_no_compile_warnings(return_value, output):
+  if return_value != 0:
+    warning = 'selfie terminates with an error code of {} during self-compilation'.format(return_value)
+    succeeded = False
+  else:
+    syntax_error_matcher = re.search('(syntax error [^\n]*)', output)
+    type_warning_matcher = re.search('(warning [^\n]*)', output)
+
+    if syntax_error_matcher != None:
+      warning = syntax_error_matcher.group(0)
+      succeeded = False
+    elif type_warning_matcher != None:
+      warning = type_warning_matcher.group(0)
+      succeeded = False
+    else:
+      warning = None
+      succeeded = True
+
+  return (succeeded, warning)
+
+
 def test_instruction_encoding(file, instruction, instruction_mask, msg):
-  exit_code, output = execute('./selfie -c grader/{} -o .tmp.bin'.format(file))
+  command = './selfie -c grader/{} -o .tmp.bin'.format(file)
+  exit_code, output, _ = execute(command)
 
   if exit_code == 0:
     exit_code = 1
 
-    with open('.tmp.bin', 'rb') as f:
-      ignored_elf_header_size = 14 * REGISTERSIZE
+    try:
+      with open('.tmp.bin', 'rb') as f:
+        ignored_elf_header_size = 14 * REGISTERSIZE
 
-      f.read(ignored_elf_header_size)
+        f.read(ignored_elf_header_size)
 
-      code_start  = read_data(f)
-      code_length = read_data(f)
+        code_start  = read_data(f)
+        code_length = read_data(f)
 
-      # ignore all pading bytes
-      no_of_bytes_until_code = code_start - ignored_elf_header_size - 2 * REGISTERSIZE
+        # ignore all pading bytes
+        no_of_bytes_until_code = code_start - ignored_elf_header_size - 2 * REGISTERSIZE
 
-      if no_of_bytes_until_code < 0:
-        no_of_bytes_until_code = 0
+        if no_of_bytes_until_code < 0: 
+          no_of_bytes_until_code = 0
 
-      f.read(no_of_bytes_until_code)
+        f.read(no_of_bytes_until_code)
 
-      # read all RISC-V instructions from binary
-      read_instructions = map(lambda x: read_instruction(f), range(int(code_length / INSTRUCTIONSIZE)))
+        # read all RISC-V instructions from binary
+        read_instructions = map(lambda x: read_instruction(f), range(int(code_length / INSTRUCTIONSIZE)))
 
-      if any(map(lambda x: x & instruction_mask == instruction, read_instructions)):
-        # at least one instruction has the right encoding
-        exit_code = 0
+        if any(map(lambda x: x & instruction_mask == instruction, read_instructions)):
+          # at least one instruction has the right encoding
+          exit_code = 0
+      
+      if os.path.isfile('.tmp.bin'):
+        os.remove('.tmp.bin')
 
-      os.remove('.tmp.bin')
+      record_result(exit_code == 0, msg, output, 'No instruction matching the RISC-V encoding found')
 
-      warning = None
+    except FileNotFoundError:
+      record_result(False, msg, '', 'The binary file has not been created by selfie')
   else:
-    warning = 'No instruction matching the RISC-V encoding found'
-
-  record_result(exit_code == 0, msg, output, warning)
+    record_result(False, msg, output, 'Selfie returned an error when executing "' + command + '"')
 
 
 
 def test_assembler_instruction_format(file, instruction, msg):
-  exit_code, output = execute('./selfie -c grader/{} -s .tmp.s'.format(file))
+  exit_code, output, _ = execute('./selfie -c grader/{} -s .tmp.s'.format(file))
 
   if exit_code == 0:
     exit_code = 1
@@ -206,8 +269,8 @@ def test_assembler_instruction_format(file, instruction, msg):
 
 
 
-def test_execution(command, msg, success_criteria=True):
-  returncode, output = execute(command)
+def test_execution(command, msg, success_criteria=True, mandatory=False):
+  returncode, output, _ = execute(command)
 
   if type(success_criteria) is bool:
     should_succeed = success_criteria
@@ -217,21 +280,21 @@ def test_execution(command, msg, success_criteria=True):
     else:
       warning = 'Execution terminated with wrong exit code {}'.format(returncode)
 
-    record_result(returncode == 0, msg, output, warning, should_succeed, command)
+    record_result(returncode == 0, msg, output, warning, should_succeed, command, mandatory)
 
   elif type(success_criteria) is int:
     record_result(returncode == success_criteria, msg, output,
-      'Execution terminated with wrong exit code {} instead of {}'.format(returncode, success_criteria), True, command)
+      'Execution terminated with wrong exit code {} instead of {}'.format(returncode, success_criteria), True, command, mandatory)
 
   elif type(success_criteria) is str:
     filtered_output = filter_status_messages(output)
 
-    record_result(filtered_output == success_criteria, msg, output, 'The actual printed output does not match', True, command)
+    record_result(filtered_output == success_criteria, msg, output, 'The actual printed output does not match', True, command, mandatory)
 
   elif callable(success_criteria):
     result, warning = success_criteria(returncode, output)
 
-    record_result(result, msg, output, warning, True, command)
+    record_result(result, msg, output, warning, True, command, mandatory)
 
 
 class Memoize:
@@ -304,6 +367,10 @@ def test_hypster_execution(file, result, msg):
 
 def test_interleaved_output(command, interleaved_msg, number_of_interleaved, msg):
   test_execution(command, msg, success_criteria=lambda code, out: is_interleaved_output(code, out, interleaved_msg, number_of_interleaved))
+ 
+
+def test_compile_warnings(file, msg, mandatory=False):
+  test_execution('./selfie -c {}'.format(file), msg, success_criteria=has_no_compile_warnings, mandatory=mandatory)
 
 
 def test_hex_literal():
@@ -361,6 +428,34 @@ def test_bitwise_shift(stage):
         'bitwise-' + direction + '-shift operator has right RISC-V encoding')
       test_mipster_execution(variable_file, 2,
         'bitwise-' + direction + '-shift operator calculates the right result for variables when executed with MIPSTER')
+
+
+
+def test_bitwise_and_or_not():
+  for operation, instruction, format_mask in [('and', AND_INSTRUCTION, R_FORMAT_MASK), ('or', OR_INSTRUCTION, R_FORMAT_MASK), ('not', NOT_INSTRUCTION, NOT_FORMAT_MASK)]:
+    literal_file = 'bitwise-' + operation + '-literals.c'
+    variable_file = 'bitwise-' + operation + '-variables.c'
+    invalid_file = 'bitwise-' + operation + '-invalid.c'
+
+    test_compilable(literal_file,
+      'bitwise-' + operation + ' operator with literals does compile')
+    test_compilable(variable_file,
+      'bitwise-' + operation + ' operator with variables does compile')
+    test_compilable(invalid_file,
+      'biwise-' + operation + ' operator with invalid syntax does not compile', should_succeed=False)
+    test_mipster_execution(literal_file, 42,
+      'bitwise-' + operation + ' operator calculates the right result for literals when executed with MIPSTER')
+    test_mipster_execution(variable_file, 42,
+      'bitwise-' + operation + ' operator calculates the right result for variables when executed with MIPSTER')
+    test_instruction_encoding(literal_file, instruction, format_mask,
+      'bitwise-' + operation + ' operator has right RISC-V encoding')
+    test_instruction_encoding(variable_file, instruction, format_mask,
+      'bitwise-' + operation + ' operator has right RISC-V encoding')
+
+  test_mipster_execution('bitwise-and-or-not-precedence.c', 42,
+    'bitwise and, or & not '  + ' operators respect the precedence of the C operators: &,|,~')
+  test_mipster_execution('bitwise-and-or-not-other-precedence.c', 42,
+    'bitwise and, or & not '  + ' operators respect the precedence of the C operators: +,-')
 
 
 
@@ -472,6 +567,10 @@ def test_treiber_stack():
     success_criteria=lambda code, out: is_permutation_of(code, out, [0, 1, 2, 3, 4, 5, 6, 7]))
 
 
+def test_base():
+  test_execution('make selfie', 'cc compiles selfie.c', mandatory=True)
+  test_compile_warnings('selfie.c', 'self-compilation does not lead to warnings or syntax errors', mandatory=True)
+
 
 def start_stage(stage):
   global number_of_positive_tests_passed, number_of_positive_tests_failed
@@ -506,7 +605,6 @@ def grade():
     number_of_tests_passed = number_of_positive_tests_passed[stage] + number_of_negative_tests_passed[stage]
 
     if number_of_tests == 0:
-      print('nothing to grade')
       return
 
     passed = number_of_tests_passed / number_of_tests
@@ -541,13 +639,48 @@ def grade():
     grade = 5
     color = 91
 
-  print('your grade is: \033[{}m\033[1m{}\033[0m'.format(color, grade))
+  if failed_mandatory_test == True:
+    print('you failed a mandatory test')
+    grade = 5
+
+  print('your grade is: \033[{}m\033[1m'.format(color), end='')
+  print_loud('{}'.format(grade), end='')
+  print('\033[0m')
+
+
+def enter_quiet_mode():
+  sys.stdout = DummyWriter()
+
+
+def print_loud(msg, end='\n'):
+  quiet_writer = sys.stdout
+  sys.stdout = sys.__stdout__
+
+  print(msg, end)
+
+  sys.stdout = quiet_writer
+
+
+def print_usage():
+  print('usage: python grader/self.py { option } { test }\n')
+
+  print('options:')
+
+  for option in defined_options:
+    print('  {}   {}'.format(option[0], option[2]))
+
+  print('\ntests: ')
+
+  for test in defined_tests:
+    print('  {}'.format(test[0]))
 
 
 defined_tests = [
+    ('base', test_base),
     ('hex-literal', test_hex_literal),
     ('bitwise-shift-1', lambda: test_bitwise_shift(1)),
     ('bitwise-shift-2', lambda: test_bitwise_shift(2)),
+    ('bitwise-and-or-not', test_bitwise_and_or_not),
     ('struct', test_structs),
     ('assembler-1', lambda: test_assembler(1)),
     ('assembler-2', lambda: test_assembler(2)),
@@ -559,26 +692,36 @@ defined_tests = [
   ]
 
 
-def print_usage():
-  print('usage: python grader/self.py { test_name }\n')
+defined_options = [
+    ('-q', enter_quiet_mode, 'only the grade is printed'),
+    ('-h', print_usage, 'this help text')
+  ]
 
-  print('available tests: ')
+def main(argv):
+  global home_path
 
-  for test in defined_tests:
-    print('  ', end='')
-    print(test[0])
-
-
-if __name__ == "__main__":
-  if len(sys.argv) <= 1:
+  if len(argv) <= 1:
     print_usage()
     exit()
 
   sys.setrecursionlimit(5000)
 
-  home_path = os.path.dirname(sys.argv[0]) + '/../'
+  home_path = os.path.dirname(argv[0]) + '/../'
 
-  tests = sys.argv[1:]
+  options = list(filter(lambda x: x[0] == '-', argv[1:]))
+
+  for option in options:
+    option_to_execute = list(filter(lambda x: x[0] == option, defined_options))
+
+    if len(option_to_execute) == 0:
+      print('unknown option: {}'.format(option))
+    else:
+      option_to_execute[0][1]()
+  
+  tests = list(set(argv[1:]) - set(options))
+
+  if 'base' not in tests and len(tests) > 0:
+    tests.insert(0, 'base')
 
   for test in tests:
     set_up()
@@ -592,4 +735,8 @@ if __name__ == "__main__":
       test_to_execute[0][1]()
 
   grade()
+
+
+if __name__ == "__main__":
+  main(sys.argv)
 

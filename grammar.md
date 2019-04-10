@@ -55,7 +55,11 @@ statement        = call ";" | while | if | return ";" |
 
 call             = identifier "(" [ expression { "," expression } ] ")" .
 
-expression       = bitshift [ ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) bitshift ] .
+expression       = bitwiseAnd [ "|" bitwiseAnd ] .
+
+bitwiseAnd       = comparison [ "&" comparison ] .
+
+comparison       = bitshift [ ( "==" | "!=" | "<" | ">" | "<=" | ">=" ) bitshift ] .
 
 bitshift         = simpleExpression [ ( "<<" | ">>" ) simpleExpression ] .
 
@@ -63,7 +67,7 @@ simpleExpression = term { ( "+" | "-" ) term } .
 
 term             = factor { ( "*" | "/" | "%" ) factor } .
 
-factor           = [ cast ] [ "-" ] [ "*" ] [ "~" ]
+factor           = [ cast ] [ "-" ] [ "~" ] [ "*" ]
                     ( identifier | call | literal | string | "(" expression ")" ) .
 
 while            = "while" "(" expression ")"
