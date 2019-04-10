@@ -602,8 +602,8 @@ uint64_t is_literal();
 uint64_t is_star_or_div_or_modulo();
 uint64_t is_plus_or_minus();
 uint64_t is_bitshift();
-uint64_t is_logicalor();
-uint64_t is_logicaland();
+uint64_t is_bitwiseor();
+uint64_t is_bitwiseand();
 uint64_t is_comparison();
 
 uint64_t look_for_factor();
@@ -3257,14 +3257,14 @@ uint64_t is_bitshift() {
     return 0;
 }
 
-uint64_t is_logicalor() {
+uint64_t is_bitwiseor() {
   if (symbol == SYM_OR)
     return 1;
   else
     return 0;
 }
 
-uint64_t is_logicaland() {
+uint64_t is_bitwiseand() {
   if (symbol == SYM_AND)
     return 1;
   else
@@ -4188,8 +4188,8 @@ uint64_t compile_bitwise_and() {
 
   // assert: allocated_temporaries == n + 1
 
-  // logical and ?
-  while (is_logicaland()) {
+  // bitwise and ?
+  while (is_bitwiseand()) {
     get_symbol();
 
     rtype = compile_comparison();
@@ -4228,8 +4228,8 @@ uint64_t compile_expression() {
 
   // assert: allocated_temporaries == n + 1
 
-  // logical or ?
-  while (is_logicalor()) {
+  // bitwise or ?
+  while (is_bitwiseor()) {
     get_symbol();
 
     rtype = compile_bitwise_and();
@@ -5604,7 +5604,7 @@ void print_instruction_counters() {
   print(", ");
   print_instruction_counter(ic, ic_addi, "addi");
   print(", ");
-  print_instruction_counter(ic, ic_addi, "xori");
+  print_instruction_counter(ic, ic_xori, "xori");
   println();
 
   printf1("%s: memory:  ", selfie_name);
@@ -5632,9 +5632,9 @@ void print_instruction_counters() {
   print(", ");
   print_instruction_counter(ic, ic_srl, "srl");
   print(", ");
-  print_instruction_counter(ic, ic_srl, "and");
+  print_instruction_counter(ic, ic_and, "and");
   print(", ");
-  print_instruction_counter(ic, ic_srl, "or");
+  print_instruction_counter(ic, ic_or, "or");
   print(", ");
   print_instruction_counter(ic, ic_beq, "beq");
   print(", ");
@@ -5772,13 +5772,13 @@ void emit_srl(uint64_t rd, uint64_t rs1, uint64_t rs2) {
 void emit_and(uint64_t rd, uint64_t rs1, uint64_t rs2) {
   emit_instruction(encode_r_format(F7_AND, rs2, rs1, F3_AND, rd, OP_OP));
 
-  ic_srl = ic_srl + 1;
+  ic_and = ic_and + 1;
 }
 
 void emit_or(uint64_t rd, uint64_t rs1, uint64_t rs2) {
   emit_instruction(encode_r_format(F7_OR, rs2, rs1, F3_OR, rd, OP_OP));
 
-  ic_srl = ic_srl + 1;
+  ic_or = ic_or + 1;
 }
 
 void emit_ld(uint64_t rd, uint64_t rs1, uint64_t immediate) {
