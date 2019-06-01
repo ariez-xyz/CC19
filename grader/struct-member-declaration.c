@@ -1,5 +1,6 @@
-struct trivial_struct { 
+struct trivial_struct {
   uint64_t member;
+  uint64_t* pointer;
 };
 
-uint64_t main(uint64_t argc, uint64_t* argv) { }
+int main(int argc, char** argv) { }

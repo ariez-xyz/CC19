@@ -1,3 +1,3 @@
-uint64_t main(uint64_t argc, uint64_t* argv) {
-  return 4 >> 1;
+int main(int argc, char** argv) {
+  return 84 >> 1;
 }

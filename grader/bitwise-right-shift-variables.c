@@ -1,8 +1,8 @@
-uint64_t main(uint64_t argc, uint64_t* argv) {
+int main(int argc, char** argv) {
   uint64_t a;
   uint64_t b;
 
-  a = 4;
+  a = 84;
   b = 1;
 
   return a >> b;

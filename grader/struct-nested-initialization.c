@@ -1,15 +1,18 @@
 struct nested_struct {
-  uint64_t member;
   struct nested_struct* another_struct;
+  uint64_t member;
 };
 
 struct nested_struct* my_struct;
 
-uint64_t main(uint64_t argc, uint64_t* argv) { 
+int main(int argc, char** argv) {
   my_struct = malloc(16);
 
   my_struct->another_struct = malloc(16);
-  my_struct->another_struct->member = 123;
+  my_struct->another_struct->member = 20;
 
-  return my_struct->another_struct->member;
+  my_struct->another_struct->another_struct = malloc(16);
+  my_struct->another_struct->another_struct->member = 22;
+
+  return my_struct->another_struct->member + my_struct->another_struct->another_struct->member;
 }
