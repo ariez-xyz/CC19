@@ -36,7 +36,11 @@ C\* Grammar:
 
 ```
 cstar            = { type identifier [ "=" [ cast ] [ "-" ] literal | selector ] ";" |
-                   ( "void" | type ) identifier procedure } .
+                   ( structDec | structDef ) ";" | ( "void" | type ) identifier procedure } .
+
+structDec        = "struct" identifier "*" identifier 
+
+structDef        = "struct" identifier "{" { ( type identifier | structDec ) ";" } "}"
 
 type             = "uint64_t" [ "*" ] .
 
@@ -47,7 +51,7 @@ literal          = integer | character .
 procedure        = "(" [ variable { "," variable } ] ")"
                     ( ";" | "{" { variable ";" } { statement } "}" ) .
 
-variable         = type identifier selector .
+variable         = type identifier selector | structDec .
 
 statement        = call ";" | while | if | return ";" |
                    ( [ "*" ] identifier selector | "*" "(" expression ")" )
