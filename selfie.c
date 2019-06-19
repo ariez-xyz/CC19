@@ -397,12 +397,13 @@ uint64_t SYM_RSHIFT       = 32; // >>
 uint64_t SYM_NOT          = 33; // ~
 uint64_t SYM_OR           = 34; // |
 uint64_t SYM_AND          = 35; // &
+uint64_t SYM_ARROW        = 36; // &
 
 // symbols for bootstrapping
 
-uint64_t SYM_INT      = 36; // int
-uint64_t SYM_CHAR     = 37; // char
-uint64_t SYM_UNSIGNED = 38; // unsigned
+uint64_t SYM_INT      = 37; // int
+uint64_t SYM_CHAR     = 38; // char
+uint64_t SYM_UNSIGNED = 39; // unsigned
 
 uint64_t* SYMBOLS; // strings representing symbols
 
@@ -476,6 +477,7 @@ void init_scanner () {
   *(SYMBOLS + SYM_NOT)          = (uint64_t) "~";
   *(SYMBOLS + SYM_OR)           = (uint64_t) "|";
   *(SYMBOLS + SYM_AND)          = (uint64_t) "&";
+  *(SYMBOLS + SYM_ARROW)        = (uint64_t) "->";
 
   *(SYMBOLS + SYM_INT)      = (uint64_t) "int";
   *(SYMBOLS + SYM_CHAR)     = (uint64_t) "char";
@@ -519,13 +521,12 @@ uint64_t report_undefined_procedures();
 // |  0 | next    | pointer to next entry
 // |  1 | string  | identifier string, big integer as string, string literal
 // |  2 | line#   | source line number
-// |  3 | class   | VARIABLE, BIGINT, STRING, PROCEDURE, TYPE
-// |  4 | type    | UINT64_T, UINT64STAR_T, VOID_T
+// |  3 | class   | VARIABLE, BIGINT, STRING, PROCEDURE, STRUCT
+// |  4 | type    | UINT64_T, UINT64STAR_T, VOID_T; STRUCT: pointer to LL of struct items
 // |  5 | value   | VARIABLE: initial value
 // |  6 | address | VARIABLE, BIGINT, STRING: offset, PROCEDURE: address
 // |  7 | scope   | REG_GP, REG_FP
 // |  8 | dims    | ARRAY: pointer to LL of dimensions (dims = 0 => not an array)
-// |  9 | struct  | STRUCT: pointer to LL of struct items etc.
 // +----+---------+
 
 uint64_t* allocate_symbol_table_entry() {
@@ -559,6 +560,7 @@ uint64_t VARIABLE  = 1;
 uint64_t BIGINT    = 2;
 uint64_t STRING    = 3;
 uint64_t PROCEDURE = 4;
+uint64_t STRUCT    = 5;
 
 // types
 uint64_t UINT64_T       = 1;
@@ -635,6 +637,7 @@ uint64_t* get_variable_or_big_int(char* variable, uint64_t class);
 void      load_upper_base_address(uint64_t* entry);
 uint64_t  load_variable_or_big_int(char* variable, uint64_t class);
 uint64_t  load_array_element(char* variable, uint64_t* selector);
+uint64_t  load_struct_member(char* variable, uint64_t* selector);
 void      load_integer(uint64_t value);
 void      load_string(char* string);
 
@@ -651,6 +654,9 @@ uint64_t  compile_expression();
 uint64_t  compile_bitwise_and();
 uint64_t  compile_comparison();
 uint64_t* compile_selector();
+uint64_t* compile_struct_selector();
+uint64_t  is_struct(uint64_t type);
+uint64_t* find_member(char* identifier, uint64_t* type);
 void      compile_while();
 void      compile_if();
 void      compile_return();
@@ -660,7 +666,8 @@ uint64_t  compile_variable(uint64_t offset);
 uint64_t  compile_initialization(uint64_t type);
 void      compile_procedure(char* procedure, uint64_t type);
 void      compile_struct_def();
-void      compile_struct_dec();
+void      compile_global_struct_dec();
+void      compile_local_struct_dec();
 
 uint64_t get_total_size(uint64_t* dims);
 uint64_t get_rowmajor_address(uint64_t* selector, uint64_t* dims);
@@ -2953,7 +2960,14 @@ void get_symbol() {
       } else if (character == CHAR_DASH) {
         get_character();
 
-        symbol = SYM_MINUS;
+        if (character == CHAR_GT) {
+          get_character();
+
+          symbol = SYM_ARROW;
+
+        } else {
+          symbol = SYM_MINUS;
+        }
 
       } else if (character == CHAR_ASTERISK) {
         get_character();
@@ -3157,6 +3171,8 @@ uint64_t* get_scoped_symbol_table_entry(char* string, uint64_t class) {
   if (class == VARIABLE)
     // local variables override global variables
     entry = search_symbol_table(local_symbol_table, string, VARIABLE);
+  else if (class == STRUCT)
+    entry = search_symbol_table(local_symbol_table, string, STRUCT);
   else if (class == PROCEDURE)
     // library procedures override declared or defined procedures
     entry = search_symbol_table(library_symbol_table, string, PROCEDURE);
@@ -3568,7 +3584,37 @@ uint64_t load_variable_or_big_int(char* variable_or_big_int, uint64_t class) {
   return get_type(entry);
 }
 
-// -TODO load appropriate element here
+uint64_t load_struct_member(char* variable, uint64_t* struct_selector) {
+  uint64_t* entry;
+  uint64_t* llptr;
+
+  entry = get_scoped_symbol_table_entry(variable, VARIABLE);
+
+  llptr = (uint64_t*) get_type(entry);
+
+  talloc();
+
+  emit_ld(current_temporary(), get_scope(entry), get_address(entry));
+
+  while (*struct_selector != 0) {
+    llptr = find_member((char*) *(struct_selector + 1), llptr);
+
+    emit_addi(current_temporary(), current_temporary(), *(llptr + 2)); // add offset
+
+    struct_selector = (uint64_t*) *struct_selector;
+
+    if (is_struct(*(llptr + 3))) {
+      emit_ld(current_temporary(), current_temporary(), 0);
+
+      llptr = (uint64_t*) get_type(search_global_symbol_table((char*) *(llptr + 1), STRUCT));
+    } 
+  } // ltype now points to ll entry of member referenced in code
+
+  emit_ld(current_temporary(), current_temporary(), 0);
+
+  return *(llptr + 3);
+}
+
 uint64_t load_array_element(char* variable, uint64_t* selector) {
   uint64_t* entry;
 
@@ -3867,6 +3913,7 @@ uint64_t compile_factor() {
   uint64_t bitwise_not;
   uint64_t dereference;
   uint64_t* selector;
+  uint64_t* struct_selector;
   char* variable_or_procedure_name;
 
   // assert: n = allocated_temporaries
@@ -3960,16 +4007,19 @@ uint64_t compile_factor() {
       // for missing return expressions
       emit_addi(REG_A0, REG_ZR, 0);
 
-    // -TODO array access in factor
     // variable access: identifier
     } else {
 
       selector = compile_selector();
 
-      if (selector == (uint64_t*) 0)
-        type = load_variable_or_big_int(variable_or_procedure_name, VARIABLE);
-      else
+      struct_selector = compile_struct_selector();
+
+      if (selector != (uint64_t*) 0)
         type = load_array_element(variable_or_procedure_name, selector);
+      else if (struct_selector != (uint64_t*) 0)
+        type = load_struct_member(variable_or_procedure_name, struct_selector);
+      else
+        type = load_variable_or_big_int(variable_or_procedure_name, VARIABLE);
     }
     
   // integer?
@@ -4582,6 +4632,7 @@ void compile_statement() {
   uint64_t* entry;
   uint64_t offset;
   uint64_t* selector;
+  uint64_t* struct_selector;
 
   // assert: allocated_temporaries == 0
 
@@ -4681,6 +4732,8 @@ void compile_statement() {
 
     selector = compile_selector();
 
+    struct_selector = compile_struct_selector();
+
     // procedure call
     if (symbol == SYM_LPARENTHESIS) {
       // -TODO handle procedure[x](); case
@@ -4699,7 +4752,6 @@ void compile_statement() {
 
     // identifier selector = expression
     } else if (symbol == SYM_ASSIGN) {
-      // -TODO array element assignment
       entry = get_variable_or_big_int(variable_or_procedure_name, VARIABLE);
 
       ltype = get_type(entry);
@@ -4708,8 +4760,15 @@ void compile_statement() {
 
       rtype = compile_expression();
 
-      if (ltype != rtype)
-        type_warning(ltype, rtype);
+      if (ltype != rtype) {
+        if (struct_selector == (uint64_t*) 0)
+          type_warning(ltype, rtype);
+        else if (is_struct(ltype)) {
+          if (rtype != 2)
+            type_warning(ltype, rtype);
+        }
+      }
+
 
       offset = get_address(entry);
 
@@ -4739,6 +4798,32 @@ void compile_statement() {
 
           tfree(2);
         }
+      } else if (struct_selector != (uint64_t*) 0) {
+          talloc();
+
+          emit_ld(current_temporary(), get_scope(entry), offset);
+
+          while (*struct_selector != 0) {
+            ltype = (uint64_t) find_member((char*) *(struct_selector + 1), (uint64_t*) ltype);
+
+            emit_addi(current_temporary(), current_temporary(), *((uint64_t*) ltype + 2)); // add offset
+
+            struct_selector = (uint64_t*) *struct_selector;
+
+            if (is_struct(*((uint64_t*) ltype + 3))) {
+              emit_ld(current_temporary(), current_temporary(), 0);
+
+              ltype = get_type(search_global_symbol_table((char*) *((uint64_t*) ltype + 1), STRUCT));
+            } 
+          } // ltype now points to ll entry of member referenced in code
+
+          if (*((uint64_t*) ltype + 1) != rtype)
+            type_warning(*((uint64_t*) ltype + 1), rtype);
+
+          emit_sd(current_temporary(), 0, previous_temporary());
+
+          tfree(2);
+
       } else if (get_dims(entry) != (uint64_t*) 0)
         syntax_error_message("cannot assign element to array");
       else {
@@ -4818,7 +4903,7 @@ uint64_t compile_variable(uint64_t offset) { // make this allocate space, return
       get_symbol();
 
       if (symbol == SYM_ASTERISK)
-          compile_struct_dec(struct_name);
+          compile_local_struct_dec(struct_name, offset - REGISTERSIZE);
 
       return 1;
   }
@@ -4848,6 +4933,61 @@ uint64_t compile_variable(uint64_t offset) { // make this allocate space, return
   }
 
   return number_of_allocated_words;
+}
+
+uint64_t is_struct(uint64_t type) {
+  if (type > 3)
+    return 1;
+  return 0;
+}
+
+// go to ll entry with corresponding identifier, if not found, return 0
+uint64_t* find_member(char* identifier, uint64_t* type) {
+  while (*(type) != 0) {
+    if (string_compare(identifier, (char*) *(type + 1)))
+      return type;
+
+    type = (uint64_t*) *(type);
+  }
+
+  if (string_compare(identifier, (char*) *(type + 1)))
+    return type;
+
+  return (uint64_t*) 0;
+}
+
+uint64_t* compile_struct_selector() {
+  uint64_t* head;
+  uint64_t* tail;
+
+  // ll:
+  //
+  // head ptr to next
+  // tail identifier
+
+  head = (uint64_t*) 0;
+  tail = (uint64_t*) 0;
+
+  while (symbol == SYM_ARROW) {
+    get_symbol();
+
+    if (symbol == SYM_IDENTIFIER) {
+      if (head == (uint64_t*) 0) {
+        head = malloc(2 * SIZEOFUINT64STAR);
+        tail = head;
+      }
+
+      *(tail + 1) = (uint64_t) identifier;
+      *tail = (uint64_t) malloc(2 * SIZEOFUINT64STAR);
+      tail = (uint64_t*) *tail;
+      *tail = 0;
+      *(tail + 1) = 0;
+    }
+
+    get_symbol();
+  }
+
+  return head;
 }
 
 // returns pointer to linked list of value(s) in selector(s)
@@ -5100,41 +5240,122 @@ void compile_procedure(char* procedure, uint64_t type) {
   // assert: allocated_temporaries == 0
 }
 
-uint64_t* compile_struct_member(uint64_t* linkedList) {
+uint64_t* compile_struct_member(uint64_t* ll, uint64_t offset) {
+    uint64_t* previous_entry;
+
+    // linked list layout: 
+
+    // offset | item
+    // -------+------------
+    // 0      | next
+    // 1      | identifier
+    // 2      | offset
+    // 3      | type
+
+    if (ll == (uint64_t*) 0) {
+        ll = malloc(4 * SIZEOFUINT64);
+
+        *ll = 0;
+
+    } else {
+        previous_entry = ll;
+
+        ll = malloc(4 * SIZEOFUINT64);
+
+        *ll = (uint64_t) previous_entry;
+    }
+
+    *(ll + 2) = offset;
+
+    if (symbol == SYM_STRUCT) { // handle nested structs
+        get_symbol();
+
+        *(ll + 3) = get_type(get_scoped_symbol_table_entry(identifier, STRUCT)); // .TODO correct?
+        
+        get_symbol();
+
+        if (symbol != SYM_ASTERISK)
+            syntax_error_message("only struct declarations are allowed inside structs");
+
+        get_symbol();
+
+    } else {
+        *(ll + 3) = compile_type();
+    }
+
+
+    if (symbol == SYM_IDENTIFIER) {
+        *(ll + 1) = (uint64_t) identifier;
+
+        get_symbol();
+
+        
+    } else {
+        syntax_error_symbol(SYM_IDENTIFIER);
+    }
+
     get_symbol();
-    return (uint64_t*) *(linkedList + 2);
+
+    return ll;
 }
 
 // to be called when symbol is pointing to lbrace in struct definition
 void compile_struct_def(char* identifier) {
     uint64_t* linkedList;
-    linkedList = malloc(4 * SIZEOFUINT64);
-    // ll layout: 
-    // 1 next
-    // 2 identifier
-    // 3 offset
-    // 4 type
+    uint64_t* entry;
+    uint64_t offset;
+    linkedList = (uint64_t*) 0;
+    offset = 0;
 
     // split this into multiple methods
     // put symbol table entry
-    while(symbol != SYM_RBRACE)
+    entry = create_symbol_table_entry(GLOBAL_TABLE, identifier, 0, STRUCT, 0, 0, 0);
+
+    get_symbol();
+    while(symbol != SYM_RBRACE) {
         // compile variables but save to linked list instead of symbol table
         // linked list holds identifier, offset, next, type (for dereferencing nested structs)
         // type for structs is a ptr to linked list w/ info
-        linkedList = compile_struct_member(linkedList);
+        linkedList = compile_struct_member(linkedList, offset);
+        offset = offset + 8;
+    }
     // set linked list in symbol table - solves references to self
+    set_type(entry, (uint64_t) linkedList);
+
     get_symbol();
 }
 // symbol=; when method returns
 
 
 // to be called when symbol is pointing to asterisk in struct instance declaration
-void compile_struct_dec(char* identifier) {
-    get_symbol();
-    // create symbol table entry:
-    // class variable
+void compile_global_struct_dec(char* struct_name) {
+    uint64_t type;
     // type is ptr to symbol table entry of struct
-    // find thys via search_global_symbol_table
+    type = get_type(get_scoped_symbol_table_entry(struct_name, STRUCT)); // .TODO correct?
+
+    get_symbol();
+
+    if (symbol == SYM_IDENTIFIER) {
+        allocated_memory = allocated_memory + REGISTERSIZE;
+        create_symbol_table_entry(GLOBAL_TABLE, identifier, 0, VARIABLE, type, 0, -allocated_memory);
+    } else
+        syntax_error_symbol(SYM_IDENTIFIER);
+
+    get_symbol();
+}
+
+void compile_local_struct_dec(char* struct_name, uint64_t offset) {
+    uint64_t type;
+    // type is ptr to symbol table entry of struct
+    type = get_type(get_scoped_symbol_table_entry(struct_name, STRUCT)); // .TODO correct?
+
+    get_symbol();
+
+    if (symbol == SYM_IDENTIFIER)
+        create_symbol_table_entry(GLOBAL_TABLE, identifier, 0, VARIABLE, type, 0, offset);
+    else
+        syntax_error_symbol(SYM_IDENTIFIER);
+
     get_symbol();
 }
 
@@ -5185,7 +5406,7 @@ void compile_cstar() {
         get_symbol();
 
         if (symbol == SYM_ASTERISK)
-            compile_struct_dec(variable_or_procedure_name);
+            compile_global_struct_dec(variable_or_procedure_name);
         else
             compile_struct_def(variable_or_procedure_name);
 

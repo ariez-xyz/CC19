@@ -54,7 +54,7 @@ procedure        = "(" [ variable { "," variable } ] ")"
 variable         = type identifier selector | structDec .
 
 statement        = call ";" | while | if | return ";" |
-                   ( [ "*" ] identifier selector | "*" "(" expression ")" )
+                   ( [ "*" ] identifier ( selector | structMember ) | "*" "(" expression ")" )
                      "=" expression ";" .
 
 call             = identifier "(" [ expression { "," expression } ] ")" .
@@ -72,9 +72,12 @@ simpleExpression = term { ( "+" | "-" ) term } .
 term             = factor { ( "*" | "/" | "%" ) factor } .
 
 factor           = [ cast ] [ "-" ] [ "~" ] [ "*" ]
-                    ( identifier selector | call | literal | string | "(" expression ")" ) .
+                   ( identifier ( selector | structMember ) 
+                     | call | literal | string | "(" expression ")" ) .
 
 selector         = { "[" integer "]" }
+
+structSelector   = { "->" identifier }
 
 while            = "while" "(" expression ")"
                              ( statement |
